@@ -7,6 +7,8 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 use std::collections::HashMap;
+use anyhow::{anyhow,Result};
+
 //use async_std::task;
 // When the `wee_alloc` feature is enabled, this uses `wee_alloc` as the global
 // allocator.
@@ -33,6 +35,8 @@ struct Cell {
     frame: Rect,
 }
 
+#[macro_use]
+mod browser;
 
 
 
