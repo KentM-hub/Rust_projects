@@ -38,14 +38,37 @@ struct Cell {
 #[macro_use]
 mod browser;
 
+pub fn canvas() -> Result<HtmlCanvasElement> {
+    document()?
+        .get_element_by_id("canvas")
+        .ok_or_else(|| anyhow!("No Canvas Element found with ID 'canvas'"))?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|element| anyhow!("Error converting {:#?} to HtmlCanvasElement" , element))
+}
 
+pub fn context() -> Result<CanvasRenderingContext2d>{
+    canvas()?
+    .get_context("2d")
+    .map_err(|js_value| anyhow!("Error getting 2d context {:#?}" , js_value))?
+    .ok_or_else(|| anyhow!("No 2d context found"))?
+    .dyn_into::<web_sys::CanvasRenderingContext2d>()
+    .map_err(|element| {
+        anyhow!( "Error converting {:#?} to CanvasRenderingContext2d" , element)
+    })
+        
+}
 
+pub fn spawn_local<F> (future: F)
+where
+    F: Future<Output = ()> + 'static,
+    {
+        wasm_bindgen_futures::spawn_local(future);
+    }
 // This is like the `main` function, except for JavaScript.
 #[wasm_bindgen(start)]
 pub fn main_js() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
-
-    let window = web_sys::window().unwrap();
+    let document = browser::document().expect("No Document Found");
     let document = window.document().unwrap();
     let canvas = document.get_element_by_id("canvas").unwrap().dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
 
@@ -113,9 +136,11 @@ pub fn main_js() -> Result<(), JsValue> {
                     );
                 }) as Box<dyn FnMut()>);
 
-                window.set_interval_with_callback_and_timeout_and_arguments_0(
-                    interval_callback.as_ref().unchecked_ref(),
-                    50,
+                browser::window()
+                    .unwrap()
+                    .set_interval_with_callback_and_timeout_and_arguments_0(
+                        interval_callback.as_ref().unchecked_ref(),
+                        50,
                 );
                 interval_callback.forget();
 
