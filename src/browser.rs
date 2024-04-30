@@ -14,3 +14,86 @@ pub fn window() -> Result<Window> {
 pub fn document() -> Result<Document> {
     window()?.document().ok_or_else(|| anyhow!("No Document Found"))
 }
+
+pub fn canvas() -> Result<HtmlCanvasElement> {
+    document()?
+        .get_element_by_id("canvas")
+        .ok_or_else(|| anyhow!("No Canvas Element found with ID 'canvas'"))?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|element| anyhow!("Error converting {:#?} to HtmlCanvasElement" , element))
+}
+
+pub fn context() -> Result<CanvasRenderingContext2d>{
+    canvas()?
+    .get_context("2d")
+    .map_err(|js_value| anyhow!("Error getting 2d context {:#?}" , js_value))?
+    .ok_or_else(|| anyhow!("No 2d context found"))?
+    .dyn_into::<web_sys::CanvasRenderingContext2d>()
+    .map_err(|element| {
+        anyhow!( "Error converting {:#?} to CanvasRenderingContext2d" , element)
+    })
+        
+}
+
+pub fn spawn_local<F> (future: F)
+where
+    F: Future<Output = ()> + 'static,
+    {
+        wasm_bindgen_futures::spawn_local(future);
+    }
+
+pub async fn fetch_with_str(resource: &str) -> Result<JsValue> {
+    JsFuture::from(window()?.fetch_with_str(resource))
+        .await
+        .map_err(|err| anyhow!("error fetching {:#?}", err))
+}
+
+pub async fn fetch_json(json_path: &str) -> Result<JsValue> {
+    let resp_value = fetch_with_str(json_path).await?;
+    let resp: Response = resp_value
+        .dyn_into()
+        .map_err(|element| anyhow!("Error converting {:#?} to Response", element))?;
+    JsFuture::from(
+        resp.json()
+            .map_err(|err| anyhow!("Could not get JSON from response {:#?}",err))?,
+    )
+    .await.map_err(|err| anyhow!("error fetching JSON {:#?}",err))
+}
+
+pub fn new_image()-> Result<HtmlImageElement> {
+    HtmlImageElement::new()
+        .map_err(|err| anyhow!("Could not create HtmlImageElement: {:#?}" , err))
+}
+
+pub type LoopClosure = Closure<dyn FnMut (f64)>
+pub fn requestAnimationFrame(callback: &LoopClosure) -> Result<i32> {
+    window()?
+        .request_animation_frame(callback)
+        .map_err(|err| anyhow!("Cannot request animation frame {:#?}",err))
+}
+
+pub fn animate(perf: f64) {
+    browser::request_animation_frame(animate);
+}
+
+pub fn create_raf_closure(f: impl FnMut(f64) + 'static) -> LoopClosure {
+    closure_wrap(Box::new(f))
+}
+
+
+
+
+
+
+pub fn closure_once <F,A,R>(fn_once: F) -> Closure<F::FnMut>
+where
+    F: 'static + wasmClosureFnOnce<A,R>,
+{
+        Closure::once(fn_once)
+}
+// This is like the `main` function, except for JavaScript.
+
+pub fn closure_wrap<T: WasmClosure + ?Sized>(data: Box<T>) -> Closure<T> {
+    Closure::wrap(data)
+}
+
