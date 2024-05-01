@@ -1,4 +1,14 @@
-
+use crate::browser::{self, LoopClosure};
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
+use futures::channel::{
+    mpsc::{unbounded, UnboundedReceiver},
+    oneshot::channel,
+};
+use serde::Deserialize;
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Mutex};
+use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
+use web_sys::{CanvasRenderingContext2d, HtmlImageElement};
 
 
 
@@ -20,27 +30,11 @@ pub struct Sheet {
     frames: HashMap<String,Cell>,
 }
 
-pub struct WalkTheDog {
-    image: Option<HtmlImageElement>,
-    sheet: Option<Sheet>,
-    frame: u8,
+#[derive(Clone,Copy)]
+pub struct Point {
+    pub x: i16,
+    pub y: i16,
 }
-impl WalkTheDog {
-    pub fn new() -> Self {
-        WalkTheDog {
-            image: None,
-            sheet: None,
-            frame: 0,
-        }
-    }
-}
-
-enum KeyPress {
-    KeyUp(web_sys::KeyboardEvent),
-    KeyDown(web_sys::KeyboardEvent),
-}
-
-
 
 pub struct Rect {
     pub x: f32,
@@ -55,6 +49,11 @@ pub struct Renderer {
     context: CanvasRenderingContext2d,
 }
 
+
+
+
+
+
 impl Renderer {
     pub fn clear(&self,rect: &Rect) {
         self.context.claer_rect(
@@ -62,24 +61,25 @@ impl Renderer {
             rect.y.info(),
             rect.width.info(),
             rect.height.info(),
-        )
+        );
     }
-}
 
-pub fn draw_image(&self, image: &HtmlImageElement, frame: &Rect, destination: &Rect){
-    self.context    
-        .draw_image_with_html_image_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
-            &image,
-            frame.x.info(),
-            frame.y.info(),
-            frame.width.info(),
-            frame.height.info(),
-            destination.x.info(),
-            destination.y.info(),
-            destination.width.info(),
-            destination.height.info(),
-        )
-        .expect("Drawing is throwing execptions! Unrecovering error.");
+
+    pub fn draw_image(&self, image: &HtmlImageElement, frame: &Rect, destination: &Rect){
+        self.context    
+            .draw_image_with_html_image_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
+                &image,
+                frame.x.info(),
+                frame.y.info(),
+                frame.width.info(),
+                frame.height.info(),
+                destination.x.info(),
+                destination.y.info(),
+                destination.width.info(),
+                destination.height.info(),
+            )
+            .expect("Drawing is throwing execptions! Unrecovering error.");
+    }
 }
 
 
@@ -119,7 +119,7 @@ pub async fn load_image(source: &str) -> Result<HtmlImageElement> {
 #[async_trait(?Send)]
 pub trait Game {
     async fn initialize(&self) -> Result<Box<dyn Game>>;
-    fn update(&mut self);
+    fn update(&mut self, keystate: &KeyState);
     fn draw(&self, context: &Renderer);
 
 }
@@ -134,6 +134,7 @@ type SharedLoopClosure = Rc<RefCell<Option<LoopClosure>>>;
 
 impl GameLoop {
     pub async fn start(mut game:impl Game + 'static) -> Result <()> {
+        let mut keyevent_reveiver = prepare_input()?;
         let mut game = game.initialize().await?;
         let mut game_loop = GameLoop {
             last_frame: browser::now()?;
@@ -146,11 +147,12 @@ impl GameLoop {
 
         let f = SharedLoopClosure = Rc::new(RefCell::new(None));
         let g = f.clone();
-
+        let mut keystate= KeyState::new();
         *g.borrow_mut() = Some(browser::create_raf_closure(move|perf: f64| {
+            process_input(&mut keystate, &mut keyevent_receiver);
             game_loop.accumulated_delta += (perf - game_loop.last_frame) ans f32;
             while game_loop.accumulated_delta > FRAME_SIZE {
-                game.update();
+                game.update(&keystate);
                 game_loop.accumulated_delta -= FRAME_SIZE;
             }
             game_loop.last_frame = perf;
@@ -167,52 +169,7 @@ impl GameLoop {
     OK(())
 }
 
-fn prepare_input() -> Result <UnboundedReceiver<KeyPress>> {
-    let (keydown_sender, keyevent_reveiver) = unbounded();
-    let keydown_sender = Rc::new(RcfCell::new(keydown_sender));
-    ket keyup_sender = Rc::clone(&keydown_sender);
-    let onkeydown = browser::closure_wrap(
-        Box::new(move |keycode: web_sys::KeyboardEvent| {
-            keydown_sender
-                .borrow_mut()
-                .start_send(KeyPress::KeyDown(keycode));
-        }) 
-            as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
-    let onkeyup = browser::closure_wrap(
-        Box::new(move |keycode: web_sys::KeyboardEvent| {
-            keyup_sender
-                .borrow_mut()
-                .start_send(KeyPress::KeyUp(keycode));
-        })
-            as Box<dyn FnMut(web_sys::KeyboardEvent)>);
-
-    browser::window()?.set_onkeydown(Some(onkeydown.as_ref().unchecked_ref()));
-
-    browser::window()?.set_onkeyup(Some(onkeyup.as_ref().unchecked_ref()));
-    
-    onkeydown.forget();
-    onkeyup.forget();
-
-    Ok(keyevent_reveiver)
-
-}
-
-fn process_input(
-    state: &mut KeyState,
-    keyevent_reveiver: &mut UnboundedReceiver<KeyPress>
-){
-    loop{
-        match keyevent_reveiver.try_next(){
-            Ok(None) =>break,
-            Err(_err) =>break,
-            Ok(Some(evt)) => match evt {
-                KeyPress::KeyUp(evt) => state.set_released(&evt.code()),
-                KeyPress::KeyDown(evt) =>state.set_pressed(&evt.code(),evt),
-            },
-        };
-    }
-}
 
 pub struct KeyState {
     pressed_keys: HashMap<String, web_sys::KeyboardEvent>,
@@ -235,3 +192,50 @@ impl KeyState {
     }
 
 }
+enum KeyPress {
+    KeyUp(web_sys::KeyboardEvent),
+    KeyDown(web_sys::KeyboardEvent),
+}
+
+fn process_input(state: &mut KeyState, keyevent_receiver: &mut UnboundedReceiver<KeyPress>) {
+    loop{
+        match keyevent_reveiver.try_next(){
+            Ok(None) =>break,
+            Err(_err) =>break,
+            Ok(Some(evt)) => match evt {
+                KeyPress::KeyUp(evt) => state.set_released(&evt.code()),
+                KeyPress::KeyDown(evt) =>state.set_pressed(&evt.code(),evt),
+            },
+        };
+    }
+}
+
+fn prepare_input() -> Result <UnboundedReceiver<KeyPress>> {
+    let (keydown_sender, keyevent_reveiver) = unbounded();
+    let keydown_sender = Rc::new(RcfCell::new(keydown_sender));
+    let keyup_sender = Rc::clone(&keydown_sender);
+    let onkeydown = browser::closure_wrap(
+        Box::new(move |keycode: web_sys::KeyboardEvent| {
+            keydown_sender
+                .borrow_mut()
+                .start_send(KeyPress::KeyDown(keycode));
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+    let onkeyup = browser::closure_wrap(
+        Box::new(move |keycode: web_sys::KeyboardEvent| {
+            keyup_sender
+                .borrow_mut()
+                .start_send(KeyPress::KeyUp(keycode));
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+    browser::canvas()?.set_onkeydown(Some(onkeydown.as_ref().unchecked_ref()));
+
+    browser::canvas()?.set_onkeyup(Some(onkeyup.as_ref().unchecked_ref()));
+    
+    onkeydown.forget();
+    onkeyup.forget();
+
+    Ok(keyevent_reveiver)
+
+}
+

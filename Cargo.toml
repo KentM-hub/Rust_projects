@@ -45,7 +45,9 @@ features = ["console",
            "CanvasRenderingContext2d",
            "Element",
            "HtmlImageElement",
-           "Response"]
+           "Response",
+           "Performance",
+           "KeyboardEvent"]
 
 # These crates are used for running unit tests.
 [dev-dependencies]

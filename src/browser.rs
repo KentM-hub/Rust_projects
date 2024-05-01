@@ -1,5 +1,12 @@
-use web_sys::Window;
-use web_sys::Document;
+use anyhow::{anyhow, Result};
+use std::future::Future;
+use wasm_bindgen::{
+    closure::WasmClosure, closure::WasmClosureFnOnce, prelude::Closure, JsCast, JsValue,
+};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{
+    CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlImageElement, Response, Window,
+};
 
 marco_rules! log {
     ($( $t:tt) *) => {
@@ -53,6 +60,7 @@ pub async fn fetch_json(json_path: &str) -> Result<JsValue> {
     let resp: Response = resp_value
         .dyn_into()
         .map_err(|element| anyhow!("Error converting {:#?} to Response", element))?;
+
     JsFuture::from(
         resp.json()
             .map_err(|err| anyhow!("Could not get JSON from response {:#?}",err))?,
@@ -66,26 +74,18 @@ pub fn new_image()-> Result<HtmlImageElement> {
 }
 
 pub type LoopClosure = Closure<dyn FnMut (f64)>
-pub fn requestAnimationFrame(callback: &LoopClosure) -> Result<i32> {
-    window()?
-        .request_animation_frame(callback)
-        .map_err(|err| anyhow!("Cannot request animation frame {:#?}",err))
-}
-
-pub fn animate(perf: f64) {
-    browser::request_animation_frame(animate);
-}
-
 pub fn create_raf_closure(f: impl FnMut(f64) + 'static) -> LoopClosure {
     closure_wrap(Box::new(f))
 }
 
+pub fn request_animation_frame(callback: &LoopClosure) -> Result<i32> {
+    window()?
+        .request_animation_frame(callback.as_ref().unchecked_ref())
+        .map_err(|err| anyhow!("Cannot request animation frame {:#?}",err))
+}
 
 
-
-
-
-pub fn closure_once <F,A,R>(fn_once: F) -> Closure<F::FnMut>
+pub fn closure_once<F,A,R>(fn_once: F) -> Closure<F::FnMut>
 where
     F: 'static + wasmClosureFnOnce<A,R>,
 {
@@ -97,3 +97,9 @@ pub fn closure_wrap<T: WasmClosure + ?Sized>(data: Box<T>) -> Closure<T> {
     Closure::wrap(data)
 }
 
+pub fn now() -> Result<f64> {
+    Ok(window()?
+        .performance()
+        .ok_or_else(|| anyhow!("Performance object not found"))?
+        .now())
+}
